@@ -60,10 +60,11 @@ public final class GSONUtils {
     public static boolean getBooleanOrThrow(@NotNull JsonObject json, @NotNull String key) {
         try {
             return json.get(key).getAsBoolean();
-        } catch (Throwable t) {
-            throw new JsonParseException("Expected to have boolean '" + key + "': " + json, t);
+        } catch (RuntimeException e) {
+            throw new JsonParseException("Expected to have boolean '" + key + "': " + json, e);
         }
     }
+    
 
     /**
      * Gets the int value from the JSON object.

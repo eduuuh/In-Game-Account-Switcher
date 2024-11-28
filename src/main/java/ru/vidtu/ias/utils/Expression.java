@@ -54,9 +54,9 @@ public final class Expression {
     private int pos = -1;
 
     /**
-     * Current character.
-     */
-    private int ch;
+        * Current character being processed.
+    */
+    private int currentCharacter;
 
     /**
      * Creates a new expression.
@@ -64,31 +64,28 @@ public final class Expression {
      * @param expression Expression string
      */
     @Contract(pure = true)
-    public Expression(@NotNull String expression) {
+    public Expression(@NotNull final String expression) {
         this.expression = SPACE_PATTERN.matcher(expression).replaceAll("");
     }
 
     /**
-     * Parses the expression.
-     *
-     * @return Parsed expression
-     * @throws IllegalStateException If expression is not valid
-     */
-    @CheckReturnValue
-    public double parse() {
-        try {
-            // Begin reading.
-            this.next();
+ * Parses the expression.
+ *
+ * @return Parsed expression
+ * @throws IllegalStateException If expression is not valid
+ */
+@CheckReturnValue
+public double parse() {
+    // Begin reading.
+    this.next();
 
-            // Parse and return.
-            double val = this.parseExpression();
-            if (this.pos >= this.expression.length()) return val;
-            throw new IllegalStateException("Read not fully: " + Character.toString(this.ch));
-        } catch (Throwable t) {
-            // Rethrow.
-            throw new IllegalStateException("Unable to parse: " + this, t);
-        }
+    // Parse and return.
+    double val = this.parseExpression();
+    if (this.pos < this.expression.length()) {
+        throw new IllegalStateException("Read not fully: " + Character.toString(this.ch));
     }
+    return val;
+}
 
     // Grammar:
     // expression = term | expression `+` term | expression `-` term
@@ -104,11 +101,15 @@ public final class Expression {
      */
     @CheckReturnValue
     private double parseExpression() {
-        double x = this.parseTerm();
+        double result = this.parseTerm();
         for (int i = 0; i < 64; i++) {
-            if (this.skipIf('+')) x += this.parseTerm(); // addition
-            else if (this.skipIf('-')) x -= this.parseTerm(); // subtraction
-            else return x;
+            if (this.skipIf('*')) {
+                x *= this.parseFactor(); // multiplication
+            } else if (this.skipIf('/')) {
+                x /= this.parseFactor(); // division
+            } else {
+                return x;
+            }
         }
         throw new RuntimeException("Out of tries.");
     }
@@ -138,39 +139,75 @@ public final class Expression {
     private double parseFactor() {
         if (this.skipIf('+')) return +this.parseFactor(); // unary plus
         if (this.skipIf('-')) return -this.parseFactor(); // unary minus
-        double x;
-        int startPos = this.pos;
-        if (this.skipIf('(')) { // parentheses
-            x = this.parseExpression();
-            if (!this.skipIf(')')) throw new RuntimeException("Missing ')'");
-        } else if ((this.ch >= '0' && this.ch <= '9') || this.ch == '.') { // numbers
-            for (int i = 0; i < 64 && ((this.ch >= '0' && this.ch <= '9') || this.ch == '.'); i++) {
-                this.next();
-            }
-            x = Double.parseDouble(this.expression.substring(startPos, this.pos));
-        } else if (this.ch >= 'a' && this.ch <= 'z') { // functions
-            for (int i = 0; i < 64 && this.ch >= 'a' && this.ch <= 'z'; i++) {
-                this.next();
-            }
-            String func = this.expression.substring(startPos, this.pos);
-            if (this.skipIf('(')) {
-                x = this.parseExpression();
-                if (!this.skipIf(')')) throw new RuntimeException("Missing ')' after argument to " + func);
-            } else {
-                x = this.parseFactor();
-            }
-            x = switch (func) {
-                case "sqrt" -> Math.sqrt(x);
-                case "sin" -> Math.sin(Math.toRadians(x));
-                case "cos" -> Math.cos(Math.toRadians(x));
-                case "tan" -> Math.tan(Math.toRadians(x));
-                default -> throw new RuntimeException("Unknown function: " + func);
-            };
+    
+        double result;
+        if (this.skipIf('(')) {
+            result = parseParentheses();
+        } else if (isDigitOrDot(this.ch)) {
+            result = parseNumber();
+        } else if (isAlphabet(this.ch)) {
+            result = parseFunction();
         } else {
             throw new RuntimeException("Unexpected: " + Character.toString(this.ch));
         }
-        if (this.skipIf('^')) x = Math.pow(x, this.parseFactor()); // exponentiation
-        return x;
+    
+        if (this.skipIf('^')) {
+            result = Math.pow(result, this.parseFactor()); // exponentiation
+        }
+    
+        return result;
+    }
+    
+    private double parseParentheses() {
+        double result = this.parseExpression();
+        if (!this.skipIf(')')) {
+            throw new RuntimeException("Missing ')'");
+        }
+        return result;
+    }
+    
+    private double parseNumber() {
+        int startPos = this.pos;
+        for (int i = 0; i < 64 && isDigitOrDot(this.ch); i++) {
+            this.next();
+        }
+        return Double.parseDouble(this.expression.substring(startPos, this.pos));
+    }
+    
+    private double parseFunction() {
+        int startPos = this.pos;
+        for (int i = 0; i < 64 && isAlphabet(this.ch); i++) {
+            this.next();
+        }
+        String func = this.expression.substring(startPos, this.pos);
+        double value;
+        if (this.skipIf('(')) {
+            value = this.parseExpression();
+            if (!this.skipIf(')')) {
+                throw new RuntimeException("Missing ')' after argument to " + func);
+            }
+        } else {
+            value = this.parseFactor();
+        }
+        return applyFunction(func, value);
+    }
+    
+    private double applyFunction(String func, double value) {
+        return switch (func) {
+            case "sqrt" -> Math.sqrt(value);
+            case "sin" -> Math.sin(Math.toRadians(value));
+            case "cos" -> Math.cos(Math.toRadians(value));
+            case "tan" -> Math.tan(Math.toRadians(value));
+            default -> throw new RuntimeException("Unknown function: " + func);
+        };
+    }
+    
+    private boolean isDigitOrDot(int ch) {
+        return (ch >= '0' && ch <= '9') || ch == '.';
+    }
+    
+    private boolean isAlphabet(int ch) {
+        return ch >= 'a' && ch <= 'z';
     }
 
     /**
@@ -221,7 +258,7 @@ public final class Expression {
      * @throws IllegalStateException If expression is not valid
      */
     @Contract(pure = true)
-    public static double parse(@NotNull String expression) {
+    public static double parse(@NotNull final String expression) {
         Expression expr = new Expression(expression);
         return expr.parse();
     }
@@ -237,7 +274,7 @@ public final class Expression {
      */
     @Contract(pure = true)
     @Nullable
-    public static Integer parsePosition(@Nullable String expression, int width, int height) {
+    public static Integer parsePosition(@Nullable String expression, final int width, final int height) {
         try {
             // Null/empty shortcut.
             if (expression == null || expression.isBlank()) return null;
